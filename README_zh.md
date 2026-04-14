@@ -1,0 +1,160 @@
+# Punc
+
+为 AI Agent 时代设计的终端 Markdown 编辑器。
+
+**[English](README.md)**
+
+## 为什么还需要一个编辑器？
+
+### 为什么要在终端里写，而不用 VS Code？
+
+VS Code 是优秀的 IDE。但它是为**写代码**设计的，不是为**写文章**设计的。
+
+当你想专注写一篇文档时，VS Code 给你的是：侧边栏、扩展通知、Git 面板、终端面板、小地图、面包屑导航……这些东西在写代码时有用，在写作时全是干扰。
+
+写作需要的是**心流**。终端天然提供这个环境——一个屏幕，一个文件，没有别的。不需要鼠标，不可能分心。
+
+而且在 Agent 时代，终端是主战场。你在终端里跑 `codex`、`claude`、`aider`，你的写作工具也应该在终端里，而不是切到另一个 GUI 窗口打断工作流。
+
+### 为什么不用现有的终端编辑器？
+
+Vim、Helix、Neovim 都是优秀的代码编辑器。但它们把 Markdown 当作"又一种文件格式"来处理。当 Agent 在外部修改了你正在编辑的文件时：
+
+- **Vim**：弹出 "File changed. Reload? (y/n)" —— 没有 diff，看不到改了什么，盲选
+- **Helix**：同样的 reload 提示，同样的盲选
+- **Nano**：根本不会察觉文件变化
+
+没有一个编辑器理解**人与 Agent 的写作循环**：
+
+```
+人写草稿 → Agent 修改文件 → 人审阅 diff → 人微调 → Agent 再改 → 审阅 → 完成
+```
+
+punc 为这个循环而生。它监听文件变化，展示精确的 diff，让你一键接受、拒绝或手动调整——全程不离开编辑器。
+
+### punc 的差异
+
+| 场景 | vim / helix | glow / mdcat | punc |
+|---|---|---|---|
+| 写草稿 | ✅ | ❌ 只能看 | ✅ |
+| Agent 改文件后审阅 | "Reload?" 没有 diff | ❌ | ✅ 行级 diff |
+| 审阅后继续编辑 | 需要手动 reload | ❌ | ✅ 无缝回到编辑 |
+| 多轮协作 | 每次弹 reload 提示 | ❌ | ✅ 持续监听，持续审阅 |
+
+## 安装
+
+### 从 GitHub Releases 下载（推荐）
+
+从 [Releases](https://github.com/dethan3/punc/releases) 下载对应平台的预编译二进制：
+
+| 平台 | 文件名 | 说明 |
+|---|---|---|
+| Linux x86_64 | `punc-linux-amd64` | 大多数 Linux 桌面和服务器 |
+| macOS Apple Silicon | `punc-darwin-arm64` | M1/M2/M3/M4 |
+| macOS Intel | `punc-darwin-amd64` | 旧款 Mac |
+| Windows | `punc-windows-amd64.exe` | Windows 10+ |
+
+```bash
+# Linux / macOS — 下载后赋予执行权限，移入 PATH
+chmod +x punc-linux-amd64
+sudo mv punc-linux-amd64 /usr/local/bin/punc
+```
+
+### 从源码构建
+
+需要 [Rust 工具链](https://rustup.rs/)（1.70+）：
+
+```bash
+git clone https://github.com/dethan3/punc.git
+cd punc
+cargo build --release
+```
+
+二进制文件在 `target/release/punc`，复制到 PATH 即可：
+
+```bash
+# Linux / macOS
+cp target/release/punc ~/.local/bin/
+
+# Windows (PowerShell)
+copy target\release\punc.exe $env:USERPROFILE\.cargo\bin\
+```
+
+### 平台说明
+
+- **Linux**：开箱即用。剪贴板粘贴（`Alt+V`）需要安装 `xclip` 或 `xsel`。
+- **macOS**：支持 Terminal.app、iTerm2、Alacritty、Kitty 等。
+- **Windows**：推荐使用 Windows Terminal。传统 `cmd.exe` 可能有渲染问题。
+
+## 使用
+
+```bash
+punc README.md
+punc ~/docs/proposal.md
+```
+
+就这样。一个文件，专注写作。
+
+## 快捷键
+
+所有快捷键统一使用 `Alt`，避免与 VS Code、tmux、系统热键冲突。
+
+### 编辑
+
+| 快捷键 | 功能 |
+|---|---|
+| `Alt+S` | 保存 |
+| `Alt+Q` | 退出 |
+| `Alt+Z` | 撤销 |
+| `Alt+Y` | 重做 |
+| `Alt+V` | 粘贴 |
+| `Tab` | 插入缩进 |
+
+### Overlay 叠加视图
+
+| 快捷键 | 功能 |
+|---|---|
+| `Alt+P` | 预览（渲染后的 Markdown） |
+| `Alt+O` | 大纲（按标题导航） |
+| `Alt+D` | Diff（审阅外部变化） |
+| `Esc` | 关闭叠加视图，回到编辑 |
+
+### Diff 视图中
+
+| 快捷键 | 功能 |
+|---|---|
+| `A` | 接受外部修改 |
+| `R` | 拒绝，保留你的版本 |
+| `E` | 接受并继续编辑 |
+| `↑↓` | 滚动 |
+| `Esc` | 稍后再说 |
+
+## Agent 协作工作流
+
+```
+终端 1                          终端 2
+┌─────────────────────┐        ┌─────────────────────┐
+│ punc proposal.md    │        │ codex / claude       │
+│                     │        │ > 帮我扩展第三节      │
+│  (你正在写)          │        │                     │
+│                     │  ←──── │ (Agent 修改了文件)    │
+│  ⚡ 检测到外部变化    │        │                     │
+│  Alt+D → diff 视图  │        │                     │
+│  A/R/E 做决定       │        │                     │
+└─────────────────────┘        └─────────────────────┘
+```
+
+不需要 API。不需要协议。不需要插件。文件系统就是接口。
+
+## 设计原则
+
+- **单一焦点** —— 一个区域，一次只看一件事
+- **按需叠加** —— 预览、大纲、diff 只在需要时出现
+- **键盘优先** —— 为写作者设计，不为鼠标设计
+- **可审阅的 diff** —— 外部修改永远不会被静默应用
+- **稳定优先于复杂** —— 做好少数事，而不是做很多半成品
+- **Unix 哲学** —— punc 负责编辑，操作系统负责文件管理
+
+## 许可证
+
+MIT

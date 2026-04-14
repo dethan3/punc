@@ -1,0 +1,17 @@
+[package]
+name = "punc"
+version = "0.1.0"
+edition = "2021"
+description = "A terminal-native Markdown editor for human-Agent collaboration"
+repository = "https://github.com/dethan3/punc"
+license = "MIT"
+keywords = ["markdown", "editor", "terminal", "tui", "agent"]
+categories = ["command-line-utilities", "text-editors"]
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+ropey = "1.6"
+notify = "7"
+similar = "2.6"
+unicode-width = "0.2"
