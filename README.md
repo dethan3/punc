@@ -43,24 +43,18 @@ punc is designed for this loop. It watches the file, shows you exactly what chan
 
 ## Install
 
-### From GitHub Releases (recommended)
+### From GitHub Releases
 
-Download the pre-built binary for your platform from [Releases](https://github.com/dethan3/punc/releases):
+Download the pre-built binary from [Releases](https://github.com/dethan3/punc/releases):
 
-| Platform | File | Note |
-|---|---|---|
-| Linux x86_64 | `punc-linux-amd64` | Most Linux desktops & servers |
-| macOS Apple Silicon | `punc-darwin-arm64` | M1/M2/M3/M4 |
-| macOS Intel | `punc-darwin-amd64` | Older Macs |
-| Windows | `punc-windows-amd64.exe` | Windows 10+ |
+> Currently only **Linux x86_64** binaries are provided. macOS and Windows support is planned.
 
 ```bash
-# Linux / macOS — download, make executable, move to PATH
 chmod +x punc-linux-amd64
 sudo mv punc-linux-amd64 /usr/local/bin/punc
 ```
 
-### From source
+### From source (any platform)
 
 Requires [Rust toolchain](https://rustup.rs/) (1.70+):
 
@@ -68,23 +62,10 @@ Requires [Rust toolchain](https://rustup.rs/) (1.70+):
 git clone https://github.com/dethan3/punc.git
 cd punc
 cargo build --release
-```
-
-The binary will be at `target/release/punc`. Copy it to your PATH:
-
-```bash
-# Linux / macOS
 cp target/release/punc ~/.local/bin/
-
-# Windows (PowerShell)
-copy target\release\punc.exe $env:USERPROFILE\.cargo\bin\
 ```
 
-### Platform notes
-
-- **Linux**: Works out of the box on any terminal. Clipboard paste (`Alt+V`) needs `xclip` or `xsel`.
-- **macOS**: Works on Terminal.app, iTerm2, Alacritty, Kitty, etc.
-- **Windows**: Works on Windows Terminal. Classic `cmd.exe` may have rendering issues.
+Clipboard paste (`Alt+V`) on Linux needs `xclip` or `xsel`.
 
 ## Usage
 
