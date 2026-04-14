@@ -31,7 +31,9 @@ pub fn highlight_line(text: &str) -> Line<'static> {
     if trimmed.starts_with('>') {
         return Line::from(Span::styled(
             text.to_string(),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
         ));
     }
 
@@ -43,7 +45,12 @@ pub fn highlight_line(text: &str) -> Line<'static> {
         let rest = &trimmed[2..];
         return Line::from(vec![
             Span::raw(indent.to_string()),
-            Span::styled(bullet.to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                bullet.to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(rest.to_string()),
         ]);
     }
@@ -58,7 +65,12 @@ pub fn highlight_line(text: &str) -> Line<'static> {
             let rest = &trimmed[pos + 2..];
             return Line::from(vec![
                 Span::raw(indent.to_string()),
-                Span::styled(num_dot.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    num_dot.to_string(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(rest.to_string()),
             ]);
         }
@@ -78,53 +90,50 @@ pub fn highlight_line(text: &str) -> Line<'static> {
 
 fn inline_highlight(text: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
     let mut i = 0;
-    let mut buf = String::new();
+    let mut plain_start = 0;
 
-    while i < len {
+    while i < text.len() {
+        let rest = &text[i..];
+
         // Bold: **text** or __text__
-        if i + 1 < len && ((chars[i] == '*' && chars[i + 1] == '*') || (chars[i] == '_' && chars[i + 1] == '_')) {
-            let delim = chars[i];
-            if let Some(end) = find_closing_double(&chars, i + 2, delim) {
-                if !buf.is_empty() {
-                    spans.push(Span::raw(buf.clone()));
-                    buf.clear();
+        if rest.starts_with("**") || rest.starts_with("__") {
+            let delim = &rest[..2];
+            if let Some(end) = rest[2..].find(delim) {
+                if plain_start < i {
+                    spans.push(Span::raw(text[plain_start..i].to_string()));
                 }
-                let content: String = chars[i + 2..end].iter().collect();
                 spans.push(Span::styled(
-                    format!("{0}{0}{1}{0}{0}", delim, content),
+                    rest[..end + 4].to_string(),
                     Style::default().add_modifier(Modifier::BOLD),
                 ));
-                i = end + 2;
+                i += end + 4;
+                plain_start = i;
                 continue;
             }
         }
 
         // Inline code: `text`
-        if chars[i] == '`' {
-            if let Some(end) = find_closing_single(&chars, i + 1, '`') {
-                if !buf.is_empty() {
-                    spans.push(Span::raw(buf.clone()));
-                    buf.clear();
+        if rest.starts_with('`') {
+            if let Some(end) = rest[1..].find('`') {
+                if plain_start < i {
+                    spans.push(Span::raw(text[plain_start..i].to_string()));
                 }
-                let content: String = chars[i..=end].iter().collect();
                 spans.push(Span::styled(
-                    content,
+                    rest[..end + 2].to_string(),
                     Style::default().fg(Color::Red).bg(Color::Rgb(40, 40, 40)),
                 ));
-                i = end + 1;
+                i += end + 2;
+                plain_start = i;
                 continue;
             }
         }
 
-        buf.push(chars[i]);
-        i += 1;
+        i += rest.chars().next().expect("slice is non-empty").len_utf8();
     }
 
-    if !buf.is_empty() {
-        spans.push(Span::raw(buf));
+    if plain_start < text.len() {
+        spans.push(Span::raw(text[plain_start..].to_string()));
     }
 
     if spans.is_empty() {
@@ -132,25 +141,4 @@ fn inline_highlight(text: &str) -> Line<'static> {
     } else {
         Line::from(spans)
     }
-}
-
-fn find_closing_double(chars: &[char], start: usize, delim: char) -> Option<usize> {
-    let len = chars.len();
-    let mut i = start;
-    while i + 1 < len {
-        if chars[i] == delim && chars[i + 1] == delim {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
-}
-
-fn find_closing_single(chars: &[char], start: usize, delim: char) -> Option<usize> {
-    for i in start..chars.len() {
-        if chars[i] == delim {
-            return Some(i);
-        }
-    }
-    None
 }

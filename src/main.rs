@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use app::{App, Mode};
+use app::{App, Mode, QuitAction};
 use watcher::FileWatcher;
 
 fn main() -> io::Result<()> {
@@ -36,8 +36,7 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(path)?;
-    let file_watcher = FileWatcher::new(path.canonicalize().unwrap_or(path.to_path_buf()))
-        .ok();
+    let file_watcher = FileWatcher::new(app.buffer.path.clone()).ok();
 
     // Main event loop
     let result = run_loop(&mut terminal, &mut app, file_watcher.as_ref());
@@ -83,26 +82,29 @@ fn run_loop(
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) {
+    if app.mode != Mode::QuitConfirm
+        && (key.modifiers, key.code) == (KeyModifiers::ALT, KeyCode::Char('q'))
+    {
+        app.request_quit();
+        return;
+    }
+
     match app.mode {
         Mode::Edit => handle_edit_key(app, key),
         Mode::Preview => handle_preview_key(app, key),
         Mode::Outline => handle_outline_key(app, key),
         Mode::Diff => handle_diff_key(app, key),
+        Mode::QuitConfirm => handle_quit_confirm_key(app, key),
     }
 }
 
 fn handle_edit_key(app: &mut App, key: KeyEvent) {
     match (key.modifiers, key.code) {
         // Ctrl combos
-        (KeyModifiers::ALT, KeyCode::Char('q')) => {
-            app.should_quit = true;
-        }
-        (KeyModifiers::ALT, KeyCode::Char('s')) => {
-            match app.buffer.save() {
-                Ok(()) => app.message = Some("Saved".to_string()),
-                Err(e) => app.message = Some(format!("Save failed: {}", e)),
-            }
-        }
+        (KeyModifiers::ALT, KeyCode::Char('s')) => match app.buffer.save() {
+            Ok(()) => app.message = Some("Saved".to_string()),
+            Err(e) => app.message = Some(format!("Save failed: {}", e)),
+        },
         (KeyModifiers::ALT, KeyCode::Char('p')) => {
             app.preview_scroll = 0;
             app.mode = Mode::Preview;
@@ -144,6 +146,8 @@ fn handle_edit_key(app: &mut App, key: KeyEvent) {
         (KeyModifiers::ALT, KeyCode::Char('d')) => {
             if app.external_change {
                 app.open_diff();
+            } else {
+                app.message = Some("No external changes".to_string());
             }
         }
         (_, KeyCode::Esc) => {}
@@ -174,16 +178,71 @@ fn get_clipboard() -> Result<String, ()> {
     // Try reading from terminal paste bracket (crossterm handles this),
     // fallback: try system clipboard via CLI tools
     use std::process::Command;
-    // Try xclip first, then xsel, then pbpaste (macOS)
-    for cmd in &["xclip -selection clipboard -o", "xsel --clipboard --output", "pbpaste"] {
-        let parts: Vec<&str> = cmd.split_whitespace().collect();
-        if let Ok(output) = Command::new(parts[0]).args(&parts[1..]).output() {
+    for (program, args) in clipboard_commands() {
+        if let Ok(output) = Command::new(program).args(*args).output() {
             if output.status.success() {
                 return String::from_utf8(output.stdout).map_err(|_| ());
             }
         }
     }
     Err(())
+}
+
+fn clipboard_commands() -> &'static [(&'static str, &'static [&'static str])] {
+    &[
+        ("/usr/bin/xclip", &["-selection", "clipboard", "-o"]),
+        ("/usr/local/bin/xclip", &["-selection", "clipboard", "-o"]),
+        ("/bin/xclip", &["-selection", "clipboard", "-o"]),
+        ("/usr/bin/xsel", &["--clipboard", "--output"]),
+        ("/usr/local/bin/xsel", &["--clipboard", "--output"]),
+        ("/bin/xsel", &["--clipboard", "--output"]),
+        ("/usr/bin/pbpaste", &[]),
+        ("/usr/local/bin/pbpaste", &[]),
+        ("/opt/homebrew/bin/pbpaste", &[]),
+        ("/opt/local/bin/pbpaste", &[]),
+        ("/bin/pbpaste", &[]),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clipboard_commands, handle_quit_confirm_key};
+    use crate::app::{App, QuitAction};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file_path(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("punc-{name}-{unique}.md"))
+    }
+
+    #[test]
+    fn clipboard_commands_use_absolute_paths() {
+        assert!(clipboard_commands()
+            .iter()
+            .all(|(program, _)| program.starts_with('/')));
+    }
+
+    #[test]
+    fn enter_uses_selected_quit_action() {
+        let path = temp_file_path("quit-enter");
+        fs::write(&path, "hello\n").unwrap();
+
+        let mut app = App::new(&path).unwrap();
+        app.buffer.insert_char('!');
+        app.request_quit();
+        app.quit_selected = QuitAction::Discard;
+
+        handle_quit_confirm_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(app.should_quit);
+
+        fs::remove_file(&path).unwrap();
+    }
 }
 
 fn handle_diff_key(app: &mut App, key: KeyEvent) {
@@ -268,6 +327,25 @@ fn handle_preview_key(app: &mut App, key: KeyEvent) {
         (_, KeyCode::PageDown) => {
             app.preview_scroll += 20;
         }
+        _ => {}
+    }
+}
+
+fn handle_quit_confirm_key(app: &mut App, key: KeyEvent) {
+    match (key.modifiers, key.code) {
+        (_, KeyCode::Char('s')) | (_, KeyCode::Char('S')) => app.save_and_quit(),
+        (_, KeyCode::Char('d')) | (_, KeyCode::Char('D')) => app.discard_and_quit(),
+        (_, KeyCode::Esc) | (_, KeyCode::Char('c')) | (_, KeyCode::Char('C')) => {
+            app.cancel_quit();
+        }
+        (_, KeyCode::Left) => app.select_prev_quit_action(),
+        (_, KeyCode::Right) | (_, KeyCode::Tab) => app.select_next_quit_action(),
+        (_, KeyCode::BackTab) => app.select_prev_quit_action(),
+        (_, KeyCode::Enter) => match app.quit_selected {
+            QuitAction::Save => app.save_and_quit(),
+            QuitAction::Discard => app.discard_and_quit(),
+            QuitAction::Cancel => app.cancel_quit(),
+        },
         _ => {}
     }
 }

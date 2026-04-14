@@ -11,6 +11,11 @@ impl Cursor {
         Self { line: 0, col: 0 }
     }
 
+    pub fn clamp(&mut self, rope: &Rope) {
+        self.line = self.line.min(last_line_index(rope));
+        self.clamp_col(rope);
+    }
+
     pub fn move_up(&mut self, rope: &Rope) {
         if self.line > 0 {
             self.line -= 1;
@@ -60,10 +65,15 @@ impl Cursor {
     }
 
     pub fn char_index(&self, rope: &Rope) -> usize {
-        let line_start = rope.line_to_char(self.line);
-        let len = line_len(rope, self.line);
+        let line = self.line.min(last_line_index(rope));
+        let line_start = rope.line_to_char(line);
+        let len = line_len(rope, line);
         line_start + self.col.min(len)
     }
+}
+
+fn last_line_index(rope: &Rope) -> usize {
+    rope.len_lines().saturating_sub(1)
 }
 
 fn line_len(rope: &Rope, line: usize) -> usize {

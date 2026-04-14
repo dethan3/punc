@@ -1,9 +1,10 @@
-use ropey::Rope;
-use std::fs;
+use ropey::{Rope, RopeSlice};
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::Cursor;
 use super::undo::{Snapshot, UndoStack};
+use super::Cursor;
 
 pub struct Buffer {
     pub rope: Rope,
@@ -11,32 +12,55 @@ pub struct Buffer {
     pub scroll_offset: usize,
     pub dirty: bool,
     pub path: PathBuf,
+    pub display_name: String,
+    revision: u64,
     pub undo_stack: UndoStack,
 }
 
 impl Buffer {
     pub fn from_file(path: &Path) -> std::io::Result<Self> {
-        let content = if path.exists() {
-            fs::read_to_string(path)?
+        let resolved_path = if path.exists() {
+            path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
         } else {
-            String::new()
+            path.to_path_buf()
         };
-        let rope = Rope::from_str(&content);
+        let rope = if resolved_path.exists() {
+            Rope::from_reader(File::open(&resolved_path)?)?
+        } else {
+            Rope::new()
+        };
+        let display_name = resolved_path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "untitled".to_string());
         Ok(Self {
             rope,
             cursor: Cursor::new(),
             scroll_offset: 0,
             dirty: false,
-            path: path.to_path_buf(),
+            path: resolved_path,
+            display_name,
+            revision: 0,
             undo_stack: UndoStack::new(),
         })
     }
 
     pub fn save(&mut self) -> std::io::Result<()> {
-        let content = self.rope.to_string();
-        fs::write(&self.path, &content)?;
+        let file = File::create(&self.path)?;
+        let mut writer = BufWriter::new(file);
+        self.rope.write_to(&mut writer)?;
+        writer.flush()?;
         self.dirty = false;
         Ok(())
+    }
+
+    pub fn content_revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn replace_content(&mut self, rope: Rope) {
+        self.rope = rope;
+        self.mark_modified();
     }
 
     pub fn save_snapshot(&mut self) {
@@ -58,7 +82,7 @@ impl Buffer {
             self.rope = snap.content;
             self.cursor.line = snap.cursor_line;
             self.cursor.col = snap.cursor_col;
-            self.dirty = true;
+            self.mark_modified();
         }
     }
 
@@ -72,7 +96,7 @@ impl Buffer {
             self.rope = snap.content;
             self.cursor.line = snap.cursor_line;
             self.cursor.col = snap.cursor_col;
-            self.dirty = true;
+            self.mark_modified();
         }
     }
 
@@ -86,7 +110,7 @@ impl Buffer {
         } else {
             self.cursor.col += 1;
         }
-        self.dirty = true;
+        self.mark_modified();
     }
 
     pub fn backspace(&mut self) {
@@ -97,7 +121,7 @@ impl Buffer {
         self.save_snapshot();
         self.cursor.move_left(&self.rope);
         self.rope.remove(idx - 1..idx);
-        self.dirty = true;
+        self.mark_modified();
     }
 
     pub fn delete(&mut self) {
@@ -107,7 +131,7 @@ impl Buffer {
         }
         self.save_snapshot();
         self.rope.remove(idx..idx + 1);
-        self.dirty = true;
+        self.mark_modified();
     }
 
     pub fn paste(&mut self, text: &str) {
@@ -126,7 +150,16 @@ impl Buffer {
                 self.cursor.col += 1;
             }
         }
-        self.dirty = true;
+        self.mark_modified();
+    }
+
+    pub fn line_text(&self, line_idx: usize) -> String {
+        let line = self.rope.line(line_idx);
+        let mut text = line.to_string();
+        if text.ends_with('\n') {
+            text.pop();
+        }
+        text
     }
 
     pub fn page_up(&mut self, height: usize) {
@@ -148,14 +181,7 @@ impl Buffer {
         let total = self.rope.len_lines();
         let start = self.scroll_offset;
         let end = (start + height).min(total);
-        (start..end).map(|i| {
-            let line = self.rope.line(i);
-            let mut s = line.to_string();
-            if s.ends_with('\n') {
-                s.pop();
-            }
-            (i, s)
-        })
+        (start..end).map(|i| (i, self.line_text(i)))
     }
 
     pub fn adjust_scroll(&mut self, height: usize) {
@@ -167,19 +193,53 @@ impl Buffer {
         }
     }
 
-    pub fn line_count(&self) -> usize {
-        self.rope.len_lines()
-    }
-
     pub fn current_section(&self) -> Option<String> {
-        for i in (0..=self.cursor.line).rev() {
-            let line = self.rope.line(i).to_string();
-            let trimmed = line.trim_start();
-            if trimmed.starts_with('#') {
-                let heading = trimmed.trim_start_matches('#').trim();
-                return Some(heading.to_string());
+        let last_line = self.rope.len_lines().saturating_sub(1);
+        for i in (0..=self.cursor.line.min(last_line)).rev() {
+            if let Some((_, heading)) = parse_heading(self.rope.line(i)) {
+                return Some(heading);
             }
         }
         None
     }
+
+    pub fn heading_at(&self, line_idx: usize) -> Option<(usize, String)> {
+        parse_heading(self.rope.line(line_idx))
+    }
+
+    fn mark_modified(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.dirty = true;
+    }
+}
+
+fn parse_heading(line: RopeSlice<'_>) -> Option<(usize, String)> {
+    let mut chars = line.chars().peekable();
+
+    while matches!(chars.peek(), Some(' ' | '\t')) {
+        chars.next();
+    }
+
+    let mut level = 0;
+    while matches!(chars.peek(), Some('#')) {
+        chars.next();
+        level += 1;
+    }
+
+    if level == 0 {
+        return None;
+    }
+
+    while matches!(chars.peek(), Some(' ' | '\t')) {
+        chars.next();
+    }
+
+    let mut text = String::new();
+    for ch in chars {
+        if ch != '\n' {
+            text.push(ch);
+        }
+    }
+
+    Some((level, text.trim().to_string()))
 }

@@ -32,7 +32,3 @@ pub fn compute_diff(old: &str, new: &str) -> Vec<DiffLine> {
 
     lines
 }
-
-pub fn has_changes(diff_lines: &[DiffLine]) -> bool {
-    diff_lines.iter().any(|l| l.tag != DiffTag::Equal)
-}

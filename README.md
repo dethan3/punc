@@ -110,6 +110,18 @@ All shortcuts use `Alt` to avoid conflicts with VS Code, tmux, and system hotkey
 | `↑↓` | Scroll |
 | `Esc` | Decide later |
 
+### External Changes
+
+When the file on disk changes outside `punc`, the status bar shows `⚡`.
+
+- `⚡` means: the disk file no longer matches your current buffer
+- `Alt+D` opens a diff between `punc`'s buffer and the current disk file
+- `A` accepts the disk version into the buffer
+- `R` ignores that external change and keeps your current buffer
+- `E` accepts the disk version, then lets you continue editing immediately
+
+If the external tool changes the file and then changes it back to match your buffer again, the `⚡` indicator disappears automatically.
+
 ## The Agent Workflow
 
 ```
