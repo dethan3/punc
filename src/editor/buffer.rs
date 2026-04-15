@@ -101,15 +101,19 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, ch: char) {
+        let mut buf = [0; 4];
+        self.insert_text(ch.encode_utf8(&mut buf));
+    }
+
+    pub fn insert_text(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+
         self.save_snapshot();
         let idx = self.cursor.char_index(&self.rope);
-        self.rope.insert_char(idx, ch);
-        if ch == '\n' {
-            self.cursor.line += 1;
-            self.cursor.col = 0;
-        } else {
-            self.cursor.col += 1;
-        }
+        self.rope.insert(idx, text);
+        self.advance_cursor(text);
         self.mark_modified();
     }
 
@@ -135,22 +139,7 @@ impl Buffer {
     }
 
     pub fn paste(&mut self, text: &str) {
-        if text.is_empty() {
-            return;
-        }
-        self.save_snapshot();
-        let idx = self.cursor.char_index(&self.rope);
-        self.rope.insert(idx, text);
-        // Move cursor to end of pasted text
-        for ch in text.chars() {
-            if ch == '\n' {
-                self.cursor.line += 1;
-                self.cursor.col = 0;
-            } else {
-                self.cursor.col += 1;
-            }
-        }
-        self.mark_modified();
+        self.insert_text(text);
     }
 
     pub fn line_text(&self, line_idx: usize) -> String {
@@ -210,6 +199,17 @@ impl Buffer {
     fn mark_modified(&mut self) {
         self.revision = self.revision.wrapping_add(1);
         self.dirty = true;
+    }
+
+    fn advance_cursor(&mut self, text: &str) {
+        for ch in text.chars() {
+            if ch == '\n' {
+                self.cursor.line += 1;
+                self.cursor.col = 0;
+            } else {
+                self.cursor.col += 1;
+            }
+        }
     }
 }
 

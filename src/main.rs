@@ -370,12 +370,7 @@ fn handle_edit_key(app: &mut App, key: KeyEvent) {
         (_, KeyCode::Enter) => app.buffer.insert_char('\n'),
         (_, KeyCode::Backspace) => app.buffer.backspace(),
         (_, KeyCode::Delete) => app.buffer.delete(),
-        (_, KeyCode::Tab) => {
-            // Insert 4 spaces for tab
-            for _ in 0..4 {
-                app.buffer.insert_char(' ');
-            }
-        }
+        (_, KeyCode::Tab) => app.buffer.insert_text("    "),
 
         _ => {}
     }
@@ -420,8 +415,8 @@ fn clipboard_commands() -> &'static [(&'static str, &'static [&'static str])] {
 #[cfg(test)]
 mod tests {
     use super::{
-        clipboard_commands, handle_quit_confirm_key, help_text, keys_text, parse_cli, run_doctor,
-        CliCommand,
+        clipboard_commands, handle_edit_key, handle_quit_confirm_key, help_text, keys_text,
+        parse_cli, run_doctor, CliCommand,
     };
     use crate::app::{App, QuitAction};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -482,6 +477,34 @@ mod tests {
         assert!(output.contains("punc doctor"));
         assert!(output.contains("clipboard helper:"));
         assert!(output.contains("file watcher:"));
+    }
+
+    #[test]
+    fn tab_is_undone_and_redone_as_one_logical_edit() {
+        let path = temp_file_path("tab-undo");
+        fs::write(&path, "").unwrap();
+
+        let mut app = App::new(&path).unwrap();
+
+        handle_edit_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.buffer.rope.to_string(), "    ");
+        assert_eq!(app.buffer.cursor.col, 4);
+
+        handle_edit_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
+        );
+        assert_eq!(app.buffer.rope.to_string(), "");
+        assert_eq!(app.buffer.cursor.col, 0);
+
+        handle_edit_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::ALT),
+        );
+        assert_eq!(app.buffer.rope.to_string(), "    ");
+        assert_eq!(app.buffer.cursor.col, 4);
+
+        fs::remove_file(&path).unwrap();
     }
 
     #[test]
