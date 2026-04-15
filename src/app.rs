@@ -173,7 +173,7 @@ impl App {
         if let Some(content) = self.external_content.take() {
             self.buffer.save_snapshot();
             self.buffer
-                .replace_content_from_disk(ropey::Rope::from_str(&content));
+                .replace_synced_content(ropey::Rope::from_str(&content));
             self.buffer.cursor.clamp(&self.buffer.rope);
             self.buffer.scroll_offset = self
                 .buffer

@@ -64,7 +64,7 @@ impl Buffer {
         self.revision
     }
 
-    pub fn replace_content_from_disk(&mut self, rope: Rope) {
+    pub fn replace_synced_content(&mut self, rope: Rope) {
         self.rope = rope;
         self.record_new_state();
         self.mark_clean();
