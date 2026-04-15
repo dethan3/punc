@@ -72,9 +72,29 @@ Clipboard paste (`Alt+V`) on Linux needs `xclip` or `xsel`.
 ```bash
 punc README.md
 punc ~/docs/proposal.md
+punc --help
+punc --version
+punc --keys
+punc doctor
 ```
 
-That's it. One file. Focused writing.
+Focused writing is still the default: one file, one editor session.
+
+### CLI Commands
+
+| Command | Action |
+|---|---|
+| `punc <file>` | Open a file for editing |
+| `punc --help` | Show CLI help |
+| `punc --version` | Show installed version |
+| `punc --keys` | Show keyboard shortcuts |
+| `punc doctor` | Check terminal, clipboard, and watcher support |
+
+If a file name starts with `-`, use `--` to stop option parsing:
+
+```bash
+punc -- --version
+```
 
 ## Keyboard Shortcuts
 
@@ -90,6 +110,16 @@ All shortcuts use `Alt` to avoid conflicts with VS Code, tmux, and system hotkey
 | `Alt+Y` | Redo |
 | `Alt+V` | Paste |
 | `Tab` | Insert indent |
+
+### Quit confirmation
+
+| Key | Action |
+|---|---|
+| `←→` / `Tab` | Select Save / Discard / Cancel |
+| `Enter` | Confirm selected action |
+| `S` | Save and quit |
+| `D` | Discard and quit |
+| `Esc` | Cancel |
 
 ### Overlays
 

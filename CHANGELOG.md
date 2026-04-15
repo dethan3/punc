@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.0 - 2026-04-15
+
+- Added built-in CLI commands for `--help`, `--version`, `--keys`, and `doctor`.
+- Fixed argument parsing so flags no longer open accidental files, with `--` support for dash-prefixed file names.
+- Added doctor checks for terminal, clipboard helper, and file watcher availability.
+- Documented the new CLI command surface and quit-confirmation shortcuts in both English and Chinese READMEs.
+
 ## v0.2.0 - 2026-04-14
 
 - Added unsaved-exit confirmation with `Save`, `Discard`, and `Cancel` actions.

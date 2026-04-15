@@ -6,9 +6,11 @@ mod ui;
 mod watcher;
 
 use std::env;
-use std::io;
-use std::path::Path;
-use std::time::Duration;
+use std::fs::{self, File};
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::process;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
@@ -20,14 +22,225 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use app::{App, Mode, QuitAction};
 use watcher::FileWatcher;
 
-fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: punc <file.md>");
-        std::process::exit(1);
-    }
-    let path = Path::new(&args[1]);
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Debug, PartialEq, Eq)]
+enum CliCommand {
+    Edit(PathBuf),
+    Help,
+    Version,
+    Keys,
+    Doctor,
+}
+
+fn main() -> io::Result<()> {
+    match parse_cli(env::args()) {
+        Ok(CliCommand::Edit(path)) => run_editor(&path),
+        Ok(CliCommand::Help) => {
+            print!("{}", help_text());
+            Ok(())
+        }
+        Ok(CliCommand::Version) => {
+            println!("punc {}", VERSION);
+            Ok(())
+        }
+        Ok(CliCommand::Keys) => {
+            print!("{}", keys_text());
+            Ok(())
+        }
+        Ok(CliCommand::Doctor) => run_doctor(io::stdout()),
+        Err(err) => {
+            eprintln!("{err}");
+            process::exit(2);
+        }
+    }
+}
+
+fn parse_cli<I>(args: I) -> Result<CliCommand, String>
+where
+    I: IntoIterator,
+    I::Item: Into<String>,
+{
+    let mut args = args.into_iter().map(Into::into);
+    let program = args.next().unwrap_or_else(|| "punc".to_string());
+    let Some(first) = args.next() else {
+        return Err(format!("No file provided.\n\n{}", usage_text(&program)));
+    };
+
+    match first.as_str() {
+        "-h" | "--help" => {
+            ensure_no_extra_args(&program, &first, args.next())?;
+            Ok(CliCommand::Help)
+        }
+        "-V" | "--version" => {
+            ensure_no_extra_args(&program, &first, args.next())?;
+            Ok(CliCommand::Version)
+        }
+        "--keys" => {
+            ensure_no_extra_args(&program, &first, args.next())?;
+            Ok(CliCommand::Keys)
+        }
+        "doctor" => {
+            ensure_no_extra_args(&program, &first, args.next())?;
+            Ok(CliCommand::Doctor)
+        }
+        "--" => {
+            let Some(path) = args.next() else {
+                return Err(format!(
+                    "Missing file path after `--`.\n\n{}",
+                    usage_text(&program)
+                ));
+            };
+            if let Some(extra) = args.next() {
+                return Err(format!(
+                    "punc accepts exactly one file path. Unexpected argument `{extra}`.\n\n{}",
+                    usage_text(&program)
+                ));
+            }
+            Ok(CliCommand::Edit(PathBuf::from(path)))
+        }
+        _ if first.starts_with('-') => Err(format!(
+            "Unknown option `{first}`.\n\n{}",
+            usage_text(&program)
+        )),
+        _ => {
+            if let Some(extra) = args.next() {
+                return Err(format!(
+                    "punc accepts exactly one file path. Unexpected argument `{extra}`.\n\n{}",
+                    usage_text(&program)
+                ));
+            }
+            Ok(CliCommand::Edit(PathBuf::from(first)))
+        }
+    }
+}
+
+fn ensure_no_extra_args(program: &str, context: &str, extra: Option<String>) -> Result<(), String> {
+    if let Some(arg) = extra {
+        Err(format!(
+            "Unexpected argument `{arg}` after `{context}`.\n\n{}",
+            usage_text(program)
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn usage_text(program: &str) -> String {
+    format!(
+        "Usage:\n  {program} <file>\n  {program} --help\n  {program} --version\n  {program} --keys\n  {program} doctor\n  {program} -- <file-starting-with-dash>"
+    )
+}
+
+fn help_text() -> String {
+    format!(
+        "punc {VERSION}\n{}\n\n{}\n\nCommands:\n  doctor          Check terminal, clipboard, and file watcher support\n\nOptions:\n  -h, --help      Show this help\n  -V, --version   Show version\n      --keys      Show keyboard shortcuts\n\nExamples:\n  punc README.md\n  punc --version\n  punc --keys\n  punc doctor\n  punc -- --version\n",
+        env!("CARGO_PKG_DESCRIPTION"),
+        usage_text("punc"),
+    )
+}
+
+fn keys_text() -> &'static str {
+    "\
+Punc Keyboard Shortcuts
+
+Editing
+  Alt+S     Save
+  Alt+Q     Quit
+  Alt+Z     Undo
+  Alt+Y     Redo
+  Alt+V     Paste
+  Tab       Insert 4 spaces
+
+Navigation
+  Arrow keys / Home / End / PageUp / PageDown
+
+Overlays
+  Alt+P     Preview
+  Alt+O     Outline
+  Alt+D     Diff external changes
+  Esc       Close overlay
+
+Diff View
+  A         Accept external changes
+  R         Reject external changes
+  E         Accept and keep editing
+  Up/Down   Scroll
+  Esc       Decide later
+
+Quit Confirmation
+  Left/Right or Tab     Select action
+  Enter                 Confirm selected action
+  S                     Save and quit
+  D                     Discard and quit
+  Esc                   Cancel
+"
+}
+
+fn run_doctor<W: Write>(mut writer: W) -> io::Result<()> {
+    writeln!(writer, "punc doctor")?;
+    writeln!(writer, "version: {VERSION}")?;
+    writeln!(
+        writer,
+        "platform: {} {}",
+        env::consts::OS,
+        env::consts::ARCH
+    )?;
+    writeln!(writer, "stdin tty: {}", yes_no(io::stdin().is_terminal()))?;
+    writeln!(writer, "stdout tty: {}", yes_no(io::stdout().is_terminal()))?;
+
+    match crossterm::terminal::size() {
+        Ok((cols, rows)) => writeln!(writer, "terminal size: {cols}x{rows}")?,
+        Err(err) => writeln!(writer, "terminal size: unavailable ({err})")?,
+    }
+
+    match available_clipboard_command() {
+        Some(program) => writeln!(writer, "clipboard helper: {program}")?,
+        None => writeln!(
+            writer,
+            "clipboard helper: unavailable (install xclip/xsel on Linux, or use terminal paste)"
+        )?,
+    }
+
+    match check_file_watcher() {
+        Ok(()) => writeln!(writer, "file watcher: ok")?,
+        Err(err) => writeln!(writer, "file watcher: unavailable ({err})")?,
+    }
+
+    Ok(())
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn available_clipboard_command() -> Option<&'static str> {
+    clipboard_commands()
+        .iter()
+        .map(|(program, _)| *program)
+        .find(|program| Path::new(program).is_file())
+}
+
+fn check_file_watcher() -> Result<(), String> {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_nanos();
+    let path = env::temp_dir().join(format!("punc-doctor-{}-{unique}.tmp", process::id()));
+
+    File::create(&path).map_err(|err| err.to_string())?;
+    let result = FileWatcher::new(path.clone())
+        .map(|_| ())
+        .map_err(|err| err.to_string());
+    let _ = fs::remove_file(&path);
+    result
+}
+
+fn run_editor(path: &Path) -> io::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -206,7 +419,10 @@ fn clipboard_commands() -> &'static [(&'static str, &'static [&'static str])] {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_commands, handle_quit_confirm_key};
+    use super::{
+        clipboard_commands, handle_quit_confirm_key, help_text, keys_text, parse_cli, run_doctor,
+        CliCommand,
+    };
     use crate::app::{App, QuitAction};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::fs;
@@ -225,6 +441,47 @@ mod tests {
         assert!(clipboard_commands()
             .iter()
             .all(|(program, _)| program.starts_with('/')));
+    }
+
+    #[test]
+    fn parse_version_flag() {
+        let command = parse_cli(["punc", "--version"]).unwrap();
+        assert_eq!(command, CliCommand::Version);
+    }
+
+    #[test]
+    fn parse_doctor_command() {
+        let command = parse_cli(["punc", "doctor"]).unwrap();
+        assert_eq!(command, CliCommand::Doctor);
+    }
+
+    #[test]
+    fn dash_dash_allows_dash_prefixed_file_name() {
+        let command = parse_cli(["punc", "--", "--version"]).unwrap();
+        assert_eq!(command, CliCommand::Edit("--version".into()));
+    }
+
+    #[test]
+    fn unknown_flag_returns_error() {
+        let err = parse_cli(["punc", "--wat"]).unwrap_err();
+        assert!(err.contains("Unknown option `--wat`"));
+    }
+
+    #[test]
+    fn help_and_keys_text_cover_new_cli_commands() {
+        assert!(help_text().contains("punc --version"));
+        assert!(help_text().contains("punc doctor"));
+        assert!(keys_text().contains("Alt+D"));
+    }
+
+    #[test]
+    fn doctor_report_includes_expected_sections() {
+        let mut output = Vec::new();
+        run_doctor(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("punc doctor"));
+        assert!(output.contains("clipboard helper:"));
+        assert!(output.contains("file watcher:"));
     }
 
     #[test]

@@ -72,9 +72,29 @@ Linux 下剪贴板粘贴（`Alt+V`）需要安装 `xclip` 或 `xsel`。
 ```bash
 punc README.md
 punc ~/docs/proposal.md
+punc --help
+punc --version
+punc --keys
+punc doctor
 ```
 
-就这样。一个文件，专注写作。
+默认仍然是一个文件、一次专注写作。
+
+### CLI 固定命令
+
+| 命令 | 功能 |
+|---|---|
+| `punc <file>` | 打开文件编辑 |
+| `punc --help` | 显示命令行帮助 |
+| `punc --version` | 显示当前版本 |
+| `punc --keys` | 显示快捷键总览 |
+| `punc doctor` | 检查终端、剪贴板和文件监听支持 |
+
+如果文件名本身以 `-` 开头，需要用 `--` 终止参数解析：
+
+```bash
+punc -- --version
+```
 
 ## 快捷键
 
@@ -90,6 +110,16 @@ punc ~/docs/proposal.md
 | `Alt+Y` | 重做 |
 | `Alt+V` | 粘贴 |
 | `Tab` | 插入缩进 |
+
+### 退出确认
+
+| 快捷键 | 功能 |
+|---|---|
+| `←→` / `Tab` | 选择 Save / Discard / Cancel |
+| `Enter` | 确认当前选项 |
+| `S` | 保存并退出 |
+| `D` | 放弃修改并退出 |
+| `Esc` | 取消 |
 
 ### Overlay 叠加视图
 
