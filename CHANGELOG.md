@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.3 - 2026-04-16
+
+- Fixed `Tab` insertion so one keypress is treated as one logical undo step.
+- Fixed external-change acceptance so using the disk version leaves the buffer clean instead of immediately triggering unsaved-change state.
+- Made dirty-state tracking follow the saved/disk-synced state, so undo and redo now correctly restore clean state when returning to saved content.
+- Improved multi-character cursor positioning by deriving coordinates from `ropey`, including correct handling for CRLF input.
+
 ## v0.3.0 - 2026-04-15
 
 - Added built-in CLI commands for `--help`, `--version`, `--keys`, and `doctor`.
