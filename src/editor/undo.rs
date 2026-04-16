@@ -5,6 +5,7 @@ pub struct Snapshot {
     pub content: Rope,
     pub cursor_line: usize,
     pub cursor_col: usize,
+    pub state_id: u64,
 }
 
 pub struct UndoStack {

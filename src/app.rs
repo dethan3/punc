@@ -172,7 +172,8 @@ impl App {
     pub fn accept_external(&mut self) {
         if let Some(content) = self.external_content.take() {
             self.buffer.save_snapshot();
-            self.buffer.replace_content(ropey::Rope::from_str(&content));
+            self.buffer
+                .replace_synced_content(ropey::Rope::from_str(&content));
             self.buffer.cursor.clamp(&self.buffer.rope);
             self.buffer.scroll_offset = self
                 .buffer
@@ -451,6 +452,24 @@ mod tests {
     }
 
     #[test]
+    fn accept_external_leaves_buffer_clean() {
+        let path = temp_file_path("accept-external-clean");
+        fs::write(&path, "hello\n").unwrap();
+
+        let mut app = App::new(&path).unwrap();
+        app.handle_external_change("hello from outside\n".to_string());
+
+        app.accept_external();
+
+        assert!(!app.buffer.dirty);
+        app.request_quit();
+        assert!(app.should_quit);
+        assert_ne!(app.mode, Mode::QuitConfirm);
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
     fn external_change_clears_when_disk_matches_buffer_again() {
         let path = temp_file_path("external-clear");
         fs::write(&path, "hello\n").unwrap();
@@ -506,6 +525,41 @@ mod tests {
         assert!(app.should_quit);
         assert!(!app.buffer.dirty);
         assert_eq!(fs::read_to_string(&path).unwrap(), "!hello\n");
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn undo_and_redo_track_saved_state_cleanly() {
+        let path = temp_file_path("undo-clean-state");
+        fs::write(&path, "hello\n").unwrap();
+
+        let mut app = App::new(&path).unwrap();
+        app.buffer.insert_char('!');
+        assert!(app.buffer.dirty);
+
+        app.buffer.undo();
+        assert!(!app.buffer.dirty);
+        assert_eq!(app.buffer.rope.to_string(), "hello\n");
+
+        app.buffer.redo();
+        assert!(app.buffer.dirty);
+        assert_eq!(app.buffer.rope.to_string(), "!hello\n");
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn paste_with_crlf_updates_cursor_using_rope_coordinates() {
+        let path = temp_file_path("paste-crlf");
+        fs::write(&path, "").unwrap();
+
+        let mut app = App::new(&path).unwrap();
+        app.buffer.insert_text("a\r\nb");
+
+        assert_eq!(app.buffer.cursor.line, 1);
+        assert_eq!(app.buffer.cursor.col, 1);
+        assert_eq!(app.buffer.rope.to_string(), "a\r\nb");
 
         fs::remove_file(&path).unwrap();
     }

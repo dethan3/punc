@@ -14,6 +14,9 @@ pub struct Buffer {
     pub path: PathBuf,
     pub display_name: String,
     revision: u64,
+    state_id: u64,
+    clean_state_id: u64,
+    next_state_id: u64,
     pub undo_stack: UndoStack,
 }
 
@@ -41,6 +44,9 @@ impl Buffer {
             path: resolved_path,
             display_name,
             revision: 0,
+            state_id: 0,
+            clean_state_id: 0,
+            next_state_id: 1,
             undo_stack: UndoStack::new(),
         })
     }
@@ -50,7 +56,7 @@ impl Buffer {
         let mut writer = BufWriter::new(file);
         self.rope.write_to(&mut writer)?;
         writer.flush()?;
-        self.dirty = false;
+        self.mark_clean();
         Ok(())
     }
 
@@ -58,45 +64,27 @@ impl Buffer {
         self.revision
     }
 
-    pub fn replace_content(&mut self, rope: Rope) {
+    pub fn replace_synced_content(&mut self, rope: Rope) {
         self.rope = rope;
-        self.mark_modified();
+        self.record_new_state();
+        self.mark_clean();
     }
 
     pub fn save_snapshot(&mut self) {
-        let snap = Snapshot {
-            content: self.rope.clone(),
-            cursor_line: self.cursor.line,
-            cursor_col: self.cursor.col,
-        };
-        self.undo_stack.push(snap);
+        self.undo_stack.push(self.current_snapshot());
     }
 
     pub fn undo(&mut self) {
-        let current = Snapshot {
-            content: self.rope.clone(),
-            cursor_line: self.cursor.line,
-            cursor_col: self.cursor.col,
-        };
+        let current = self.current_snapshot();
         if let Some(snap) = self.undo_stack.undo(current) {
-            self.rope = snap.content;
-            self.cursor.line = snap.cursor_line;
-            self.cursor.col = snap.cursor_col;
-            self.mark_modified();
+            self.restore_snapshot(snap);
         }
     }
 
     pub fn redo(&mut self) {
-        let current = Snapshot {
-            content: self.rope.clone(),
-            cursor_line: self.cursor.line,
-            cursor_col: self.cursor.col,
-        };
+        let current = self.current_snapshot();
         if let Some(snap) = self.undo_stack.redo(current) {
-            self.rope = snap.content;
-            self.cursor.line = snap.cursor_line;
-            self.cursor.col = snap.cursor_col;
-            self.mark_modified();
+            self.restore_snapshot(snap);
         }
     }
 
@@ -112,9 +100,12 @@ impl Buffer {
 
         self.save_snapshot();
         let idx = self.cursor.char_index(&self.rope);
+        let old_len = self.rope.len_chars();
         self.rope.insert(idx, text);
-        self.advance_cursor(text);
-        self.mark_modified();
+        let new_idx = idx + (self.rope.len_chars() - old_len);
+        self.cursor.line = self.rope.char_to_line(new_idx);
+        self.cursor.col = new_idx - self.rope.line_to_char(self.cursor.line);
+        self.record_new_state();
     }
 
     pub fn backspace(&mut self) {
@@ -125,7 +116,7 @@ impl Buffer {
         self.save_snapshot();
         self.cursor.move_left(&self.rope);
         self.rope.remove(idx - 1..idx);
-        self.mark_modified();
+        self.record_new_state();
     }
 
     pub fn delete(&mut self) {
@@ -135,7 +126,7 @@ impl Buffer {
         }
         self.save_snapshot();
         self.rope.remove(idx..idx + 1);
-        self.mark_modified();
+        self.record_new_state();
     }
 
     pub fn paste(&mut self, text: &str) {
@@ -196,20 +187,38 @@ impl Buffer {
         parse_heading(self.rope.line(line_idx))
     }
 
-    fn mark_modified(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
-        self.dirty = true;
+    fn current_snapshot(&self) -> Snapshot {
+        Snapshot {
+            content: self.rope.clone(),
+            cursor_line: self.cursor.line,
+            cursor_col: self.cursor.col,
+            state_id: self.state_id,
+        }
     }
 
-    fn advance_cursor(&mut self, text: &str) {
-        for ch in text.chars() {
-            if ch == '\n' {
-                self.cursor.line += 1;
-                self.cursor.col = 0;
-            } else {
-                self.cursor.col += 1;
-            }
-        }
+    fn restore_snapshot(&mut self, snapshot: Snapshot) {
+        self.rope = snapshot.content;
+        self.cursor.line = snapshot.cursor_line;
+        self.cursor.col = snapshot.cursor_col;
+        self.state_id = snapshot.state_id;
+        self.revision = self.revision.wrapping_add(1);
+        self.sync_dirty();
+    }
+
+    fn record_new_state(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.state_id = self.next_state_id;
+        self.next_state_id = self.next_state_id.wrapping_add(1);
+        self.sync_dirty();
+    }
+
+    fn mark_clean(&mut self) {
+        self.clean_state_id = self.state_id;
+        self.dirty = false;
+    }
+
+    fn sync_dirty(&mut self) {
+        self.dirty = self.state_id != self.clean_state_id;
     }
 }
 
