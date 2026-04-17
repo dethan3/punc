@@ -375,10 +375,11 @@ fn handle_edit_key(app: &mut App, key: KeyEvent) {
         _ => {}
     }
 
-    // Adjust scroll after cursor movement
-    if let Ok((_, rows)) = crossterm::terminal::size() {
+    // Adjust scroll after cursor movement (wrap-aware)
+    if let Ok((cols, rows)) = crossterm::terminal::size() {
         let editor_height = rows.saturating_sub(2) as usize; // minus status + hint bars
-        app.buffer.adjust_scroll(editor_height);
+        let editor_width = cols as usize;
+        app.buffer.adjust_scroll_wrapped(editor_height, editor_width);
     }
 }
 

@@ -5,7 +5,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
-
 use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, Mode, PreviewRow, PreviewRowKind, QuitAction};
@@ -39,29 +38,36 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     match effective_mode(app) {
         Mode::Edit => {
-            let lines: Vec<Line> = app
-                .buffer
-                .visible_lines(area_height)
-                .map(|(_, text)| highlight::highlight_line(&text))
-                .collect();
+            let area_width = chunks[1].width as usize;
+            let scroll = app.buffer.scroll_offset;
+            let total = app.buffer.rope.len_lines();
+            let fetch_end = total.min(scroll + (area_height * 3).max(area_height + 50));
+            // Pre-split each logical line into visual rows so wrapping works for
+            // CJK and any text regardless of ratatui's word-wrap algorithm.
+            let mut lines: Vec<Line> = Vec::new();
+            for i in scroll..fetch_end {
+                let text = app.buffer.line_text(i);
+                for row in split_line_for_display(&text, area_width) {
+                    lines.push(highlight::highlight_line(&row));
+                }
+            }
             let editor = Paragraph::new(lines).block(Block::default());
             frame.render_widget(editor, chunks[1]);
 
-            // Cursor — use display width for correct CJK positioning
+            // Cursor — account for soft-wrapped rows above the cursor line.
             let cursor_line = app
                 .buffer
                 .cursor
                 .line
                 .min(app.buffer.rope.len_lines().saturating_sub(1));
-            let cursor_y =
-                chunks[1].y + cursor_line.saturating_sub(app.buffer.scroll_offset) as u16;
-            let line_slice = app.buffer.rope.line(cursor_line);
-            let display_col: usize = line_slice
-                .chars()
-                .take(app.buffer.cursor.col)
-                .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+            let visual_rows_above: usize = (scroll..cursor_line)
+                .map(|i| app.buffer.visual_rows_for_line(i, area_width))
                 .sum();
-            let cursor_x = chunks[1].x + display_col as u16;
+            let display_col = app.buffer.cursor_display_col();
+            let wrap_row = if area_width > 0 { display_col / area_width } else { 0 };
+            let wrap_col = if area_width > 0 { display_col % area_width } else { display_col };
+            let cursor_y = chunks[1].y + (visual_rows_above + wrap_row) as u16;
+            let cursor_x = chunks[1].x + wrap_col as u16;
             frame.set_cursor_position((cursor_x, cursor_y));
         }
         Mode::Preview => {
@@ -254,6 +260,27 @@ fn centered_rect(area: ratatui::layout::Rect, width: u16, height: u16) -> ratatu
             Constraint::Fill(1),
         ])
         .split(vertical[1])[1]
+}
+
+fn split_line_for_display(text: &str, width: usize) -> Vec<String> {
+    if width == 0 || text.is_empty() {
+        return vec![text.to_string()];
+    }
+    let mut rows: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for ch in text.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_width + cw > width && !current.is_empty() {
+            rows.push(current.clone());
+            current.clear();
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += cw;
+    }
+    rows.push(current);
+    rows
 }
 
 fn render_preview_row(app: &App, row: &PreviewRow) -> Line<'static> {

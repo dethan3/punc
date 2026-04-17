@@ -2,6 +2,7 @@ use ropey::{Rope, RopeSlice};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use unicode_width::UnicodeWidthChar;
 
 use super::undo::{Snapshot, UndoStack};
 use super::Cursor;
@@ -157,19 +158,67 @@ impl Buffer {
         self.scroll_offset = (self.scroll_offset + jump).min(max_line);
     }
 
-    pub fn visible_lines(&self, height: usize) -> impl Iterator<Item = (usize, String)> + '_ {
-        let total = self.rope.len_lines();
-        let start = self.scroll_offset;
-        let end = (start + height).min(total);
-        (start..end).map(|i| (i, self.line_text(i)))
-    }
-
     pub fn adjust_scroll(&mut self, height: usize) {
         if self.cursor.line < self.scroll_offset {
             self.scroll_offset = self.cursor.line;
         }
         if self.cursor.line >= self.scroll_offset + height {
             self.scroll_offset = self.cursor.line - height + 1;
+        }
+    }
+
+    pub fn visual_rows_for_line(&self, line_idx: usize, width: usize) -> usize {
+        if line_idx >= self.rope.len_lines() || width == 0 {
+            return 1;
+        }
+        let dw: usize = self
+            .rope
+            .line(line_idx)
+            .chars()
+            .filter(|&c| c != '\n' && c != '\r')
+            .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum();
+        ((dw + width - 1) / width).max(1)
+    }
+
+    pub fn cursor_display_col(&self) -> usize {
+        let last = self.rope.len_lines().saturating_sub(1);
+        let line = self.cursor.line.min(last);
+        self.rope
+            .line(line)
+            .chars()
+            .take(self.cursor.col)
+            .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+            .sum()
+    }
+
+    pub fn adjust_scroll_wrapped(&mut self, height: usize, width: usize) {
+        if width == 0 {
+            return self.adjust_scroll(height);
+        }
+        let last = self.rope.len_lines().saturating_sub(1);
+        let cursor_line = self.cursor.line.min(last);
+        if cursor_line < self.scroll_offset {
+            self.scroll_offset = cursor_line;
+            return;
+        }
+        let cursor_sub = self.cursor_display_col() / width;
+        let rows_before: usize = (self.scroll_offset..cursor_line)
+            .map(|i| self.visual_rows_for_line(i, width))
+            .sum();
+        let cursor_visual_row = rows_before + cursor_sub;
+        if cursor_visual_row < height {
+            return;
+        }
+        let mut to_skip = cursor_visual_row - height.saturating_sub(1);
+        while to_skip > 0 && self.scroll_offset < cursor_line {
+            let rows = self.visual_rows_for_line(self.scroll_offset, width);
+            if rows <= to_skip {
+                to_skip -= rows;
+            } else {
+                to_skip = 0;
+            }
+            self.scroll_offset += 1;
         }
     }
 
@@ -251,4 +300,57 @@ fn parse_heading(line: RopeSlice<'_>) -> Option<(usize, String)> {
     }
 
     Some((level, text.trim().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Buffer;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("punc-buffer-{name}-{unique}.md"))
+    }
+
+    #[test]
+    fn visual_rows_for_ascii_wrap_match_terminal_width() {
+        let path = temp_file_path("ascii-wrap");
+        fs::write(&path, format!("{}\n", "a".repeat(85))).unwrap();
+
+        let buffer = Buffer::from_file(&path).unwrap();
+
+        assert_eq!(buffer.visual_rows_for_line(0, 80), 2);
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn visual_rows_for_cjk_wrap_use_display_width() {
+        let path = temp_file_path("cjk-wrap");
+        fs::write(&path, format!("{}\n", "你".repeat(41))).unwrap();
+
+        let buffer = Buffer::from_file(&path).unwrap();
+
+        assert_eq!(buffer.visual_rows_for_line(0, 80), 2);
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn cursor_display_col_counts_wide_chars() {
+        let path = temp_file_path("display-col");
+        fs::write(&path, "你a\n").unwrap();
+
+        let mut buffer = Buffer::from_file(&path).unwrap();
+        buffer.cursor.col = 2;
+
+        assert_eq!(buffer.cursor_display_col(), 3);
+
+        fs::remove_file(&path).unwrap();
+    }
 }

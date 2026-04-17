@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4 - 2026-04-17
+
+- Made edit-mode soft wrapping render and cursor placement width-aware in both debug and release builds.
+- Improved wrapped-line behavior for wide CJK characters by using display width instead of raw character count.
+- Added regression tests for wrapped-row and display-column calculations.
+
 ## v0.3.3 - 2026-04-16
 
 - Fixed `Tab` insertion so one keypress is treated as one logical undo step.
